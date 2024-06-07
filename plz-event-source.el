@@ -1,10 +1,13 @@
-;;; plz-event-source.el --- Server Sent Event Source -*- lexical-binding: t; -*-
+;;; plz-event-source.el --- Plz Event Source -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2019-2023  Free Software Foundation, Inc.
 
 ;; Author: r0man <roman@burningswell.com>
 ;; Maintainer: r0man <roman@burningswell.com>
 ;; URL: https://github.com/r0man/plz-event-source.el
+;; Version: 0.1-pre
+;; Package-Requires: ((emacs "26.3") (plz "0.8"))
+;; Keywords: comm, network, http
 
 ;; This file is part of GNU Emacs.
 
@@ -306,12 +309,6 @@
   (dolist (event (reverse events))
     (plz-event-source--dispatch-event source event)))
 
-(defun plz-event-source--response-in-buffer-p ()
-  "Return non-nil the if point is looking at a HTTP response."
-  (save-excursion
-    (goto-char (point-min))
-    (re-search-forward plz-http-end-of-headers-regexp nil t)))
-
 ;; Buffer event source
 
 (defclass plz-event-source-buffer (plz-event-source)
@@ -333,10 +330,27 @@
       (plz-event-source--dispatch-events source events)
       (setf events nil))))
 
+(defun plz-event-source--skip-proxy-headers ()
+  "Skip proxy headers in current buffer."
+  (when (looking-at plz-http-response-status-line-regexp)
+    (let* ((status-code (string-to-number (match-string 2)))
+           (reason-phrase (match-string 3)))
+      (when (and (equal 200 status-code)
+                 (equal "Connection established" reason-phrase))
+        (re-search-forward "\r\n\r\n" nil t)))))
+
+(defun plz-event-source--skip-redirect-headers ()
+  "Skip HTTP redirect headers in current buffer."
+  (when (and (looking-at plz-http-response-status-line-regexp)
+             (member (string-to-number (match-string 2)) '(301 302 303 307 308)))
+    (re-search-forward "\r\n\r\n" nil t)))
+
 (defun plz-event-source--buffer-start-position ()
   "Return the start position of the current buffer."
   (save-excursion
     (goto-char (point-min))
+    (plz-event-source--skip-proxy-headers)
+    (while (plz-event-source--skip-redirect-headers))
     (re-search-forward plz-http-end-of-headers-regexp nil t)
     (point)))
 
